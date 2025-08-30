@@ -1,0 +1,46 @@
+seed: 1337
+run_name: cifar10_mvp
+out_dir: outputs/cifar10_mvp
+
+
+# data
+dataset: cifar10
+batch_size: 128
+num_workers: 8
+split: {train: 0.7, calib: 0.15, test: 0.15}
+
+
+# condition encoder g(c)->e
+num_classes: 10
+d_c: 64
+
+
+# diffusion
+T: 200
+beta_schedule: cosine
+guidance_scale: 2.0
+img_size: 32
+channels: 3
+model: unet2d_small
+ema_decay: 0.999
+mixed_precision: true
+
+
+# phi + PCA
+phi_backbone: resnet18
+phi_dim: 64
+
+
+# MDN
+mdn_components: 6
+mdn_hidden: 256
+
+
+# sampling
+K: 256
+alphas: [0.5, 0.7, 0.8, 0.9, 0.95]
+
+
+# logging
+save_every_steps: 2000
+val_every_steps: 2000

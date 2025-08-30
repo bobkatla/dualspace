@@ -1,0 +1,41 @@
+seed: 1337
+run_name: ucihar_mvp
+out_dir: outputs/ucihar_mvp
+
+
+# data
+dataset: uci_har
+batch_size: 64
+num_workers: 8
+split: {train: 0.7, calib: 0.15, test: 0.15}
+
+
+# condition encoder
+num_classes: 6
+d_c: 64
+
+
+# diffusion 1D
+T: 200
+beta_schedule: cosine
+guidance_scale: 2.0
+seq_len: 128
+channels: 9 # HAR channels
+model: unet1d_small
+ema_decay: 0.999
+mixed_precision: true
+
+
+# phi + PCA
+phi_backbone: cnn1d
+phi_dim: 32
+
+
+# MDN
+mdn_components: 6
+mdn_hidden: 256
+
+
+# sampling
+K: 256
+alphas: [0.5, 0.7, 0.8, 0.9, 0.95]
