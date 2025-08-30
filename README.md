@@ -6,7 +6,8 @@ A conditional generator that maps a condition cc (labels/attributes) to a region
 - (i) train a conditional diffusion model $p_\theta(x\mid e)$ with a learned condition embedding $e=g(c)$;
 - (ii) define a feature map $\phi(x)=y$ into a low-dimensional, stable space;
 - (iii) fit an amortized conditional density $\hat p_\psi(y\mid e)$ (MDN);
-- (iv) calibrate thresholds τα\tau_\alpha via conformal prediction to guarantee finite-sample coverage $\Pr[x\in \mathcal R_\alpha(c)]\ge \alpha$; and (v) at inference, sample drafts, score in $\phi$-space, keep those in the calibrated region, and pick diverse representatives.
+- (iv) calibrate thresholds $\tau_\alpha$ via conformal prediction to guarantee finite-sample coverage $\Pr[x\in \mathcal R_\alpha(c)]\ge \alpha$;
+- (v) at inference, sample drafts, score in $\phi$-space, keep those in the calibrated region, and pick diverse representatives.
 
 To begin, it will be an MVP across CIFAR-10 (images) and UCI HAR (time-series), with clean scripts, metrics, and plots.
 
