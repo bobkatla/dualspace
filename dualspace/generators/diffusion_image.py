@@ -10,27 +10,68 @@ sample(c, K, guidance_scale) -> x: (K, C, H, W)
 from __future__ import annotations
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from .unet2d import UNet2DSmall
+from .scheduler import cosine_beta_schedule
 
 
 class ImageDiffusion(nn.Module):
-    def __init__(self, in_ch: int = 3, d_c: int = 64, T: int = 200):
+    def __init__(self, in_ch: int = 3, d_c: int = 64, T: int = 200, p_uncond: float = 0.1):
         super().__init__()
         self.unet = UNet2DSmall(in_ch=in_ch, d_c=d_c)
         self.T = T
-        # TODO: register schedule buffers
+        self.p_uncond = p_uncond
+        betas = cosine_beta_schedule(T)
+        alphas = 1.0 - betas
+        alphas_cumprod = torch.cumprod(alphas, dim=0)
+        self.register_buffer('betas', betas)
+        self.register_buffer('alphas', alphas)
+        self.register_buffer('alphas_cumprod', alphas_cumprod)
+        self.register_buffer('sqrt_alphas_cumprod', torch.sqrt(alphas_cumprod))
+        self.register_buffer('sqrt_one_minus_alphas_cumprod', torch.sqrt(1.0 - alphas_cumprod))
 
+    def q_sample(self, x0: torch.Tensor, t: torch.Tensor, noise: torch.Tensor) -> torch.Tensor:
+        return (self.sqrt_alphas_cumprod[t].view(-1,1,1,1) * x0 +
+                self.sqrt_one_minus_alphas_cumprod[t].view(-1,1,1,1) * noise)
 
-    def loss(self, x0: torch.Tensor, e: torch.Tensor) -> torch.Tensor:
-        """Compute noise-prediction loss for a batch.
-        x0: (B,3,H,W), e: (B,d_c)
-        """
-        raise NotImplementedError
-
+    def loss(self, x0: torch.Tensor, e: torch.Tensor, null_e: torch.Tensor) -> torch.Tensor:
+        B = x0.size(0)
+        t = torch.randint(0, self.T, (B,), device=x0.device)
+        noise = torch.randn_like(x0)
+        x_t = self.q_sample(x0, t, noise)
+        # classifier-free: randomly drop conditioning
+        drop = (torch.rand(B, device=x0.device) < self.p_uncond).float().view(B,1)
+        e_used = e * (1.0 - drop) + null_e * drop
+        eps_pred = self.unet(x_t, t, e_used)
+        return F.mse_loss(eps_pred, noise)
+    
+    @torch.no_grad()
+    def p_sample(self, x: torch.Tensor, t: int, e: torch.Tensor, guidance_scale: float = 2.0, null_e: torch.Tensor | None = None) -> torch.Tensor:
+        t_tensor = torch.full((x.size(0),), t, device=x.device, dtype=torch.long)
+        eps_c = self.unet(x, t_tensor, e)
+        if null_e is not None and guidance_scale != 1.0:
+            eps_u = self.unet(x, t_tensor, null_e.expand_as(e))
+            eps = eps_u + guidance_scale * (eps_c - eps_u)
+        else:
+            eps = eps_c
+        beta_t = self.betas[t]
+        alpha_t = self.alphas[t]
+        alpha_bar_t = self.alphas_cumprod[t]
+        sqrt_one_minus_ab = torch.sqrt(1 - alpha_bar_t)
+        sqrt_recip_alpha = torch.sqrt(1.0 / alpha_t)
+        mean = (1/torch.sqrt(alpha_t)) * (x - (beta_t / sqrt_one_minus_ab) * eps)
+        if t > 0:
+            noise = torch.randn_like(x)
+            sigma = torch.sqrt(beta_t)
+            return mean + sigma * noise
+        else:
+            return mean
 
     @torch.no_grad()
-    def sample(self, e: torch.Tensor, K: int = 256, guidance_scale: float = 2.0, shape=(3,32,32)) -> torch.Tensor:
-        """Draw K samples conditioned on e.
-        Returns (K,3,H,W).
-        """
-        raise NotImplementedError
+    def sample(self, e: torch.Tensor, K: int = 64, guidance_scale: float = 2.0, shape=(3,32,32), null_e: torch.Tensor | None = None) -> torch.Tensor:
+        x = torch.randn((K, *shape), device=e.device)
+        if null_e is None:
+            null_e = torch.zeros_like(e[:1])
+        for t in reversed(range(self.T)):
+            x = self.p_sample(x, t, e, guidance_scale, null_e)
+        return x
