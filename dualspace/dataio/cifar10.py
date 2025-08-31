@@ -7,10 +7,13 @@ import torchvision.transforms as T
 from torchvision.datasets import CIFAR10
 from dualspace.utils.splits import stratified_split, class_hist, Splits
 
+def _scale_for_transform(x):
+    return x * 2.0 - 1.0
+
 # Transform: to [-1, 1]
 _cifar_transform = T.Compose([
     T.ToTensor(), # [0,1]
-    T.Lambda(lambda x: x * 2.0 - 1.0), # [-1,1]
+    T.Lambda(_scale_for_transform), # [-1,1]
 ])
 
 def load_cifar10(root: str | Path = "data/cifar10", download: bool = True) -> Tuple[torch.utils.data.Dataset, torch.Tensor]:
@@ -37,3 +40,22 @@ def build_cifar10_loaders(cfg: Dict) -> Tuple[Dict[str, DataLoader], Splits, Dic
         "test": class_hist(labels, splits.test),
     }
     return loaders, splits, hists
+
+def compute_channel_stats(loader: DataLoader) -> Dict[str, list[float]]:
+    """Compute per-channel mean/std over a loader of CIFAR tensors in [-1,1]."""
+    cnt = 0
+    mean = torch.zeros(3)
+    M2 = torch.zeros(3)
+    for x, _ in loader:
+        B = x.shape[0]
+        cnt += B * x.shape[2] * x.shape[3]
+        x_flat = x.permute(1, 0, 2, 3).contiguous().view(3, -1)
+        batch_mean = x_flat.mean(dim=1)
+        batch_var = x_flat.var(dim=1, unbiased=False)
+        # Welford combine
+        delta = batch_mean - mean
+        mean = mean + delta * (x_flat.shape[1] / cnt)
+        M2 = M2 + batch_var * x_flat.shape[1] + (delta ** 2) * (x_flat.shape[1] * (cnt - x_flat.shape[1]) / cnt)
+    var = M2 / cnt
+    std = var.sqrt()
+    return {"mean": mean.tolist(), "std": std.tolist()}
