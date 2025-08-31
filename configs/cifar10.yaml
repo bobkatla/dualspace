@@ -14,6 +14,12 @@ split: {train: 0.7, calib: 0.15, test: 0.15}
 num_classes: 10
 d_c: 64
 
+# Optional encoder-specific knobs
+g:
+  hidden: 256
+  depth: 2
+  dropout: 0.0
+  norm: null # options: null | layernorm | l2
 
 # diffusion
 T: 200
