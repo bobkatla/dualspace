@@ -17,9 +17,11 @@ d_c: 64
 # Optional encoder-specific knobs
 g:
   hidden: 256
-  depth: 2
+  depth: 1
   dropout: 0.0
-  norm: null # options: null | layernorm | l2
+  norm: l2 # options: null | layernorm | l2
+  mode: linear_orth
+  orth_reg: 0.0          # set >0 if you want to regularize
 
 # diffusion
 T: 200
