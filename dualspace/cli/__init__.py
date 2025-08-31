@@ -12,6 +12,7 @@ from dualspace.cli.infer import infer
 from dualspace.cli.train_amortized import train_amortized
 from dualspace.cli.train_gen import train_gen
 from dualspace.cli.visualize import visualize
+from dualspace.cli.prep_data import prep_data
 
 @click.group()
 @click.version_option(version=__version__, prog_name="dualspace")
@@ -33,3 +34,4 @@ main.add_command(train_amortized, name="train-amortized")
 main.add_command(calibrate, name="calibrate")
 main.add_command(infer, name="infer")
 main.add_command(visualize, name="visualize")
+main.add_command(prep_data, name="prep-data")
