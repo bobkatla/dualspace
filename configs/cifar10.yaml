@@ -24,7 +24,7 @@ g:
   orth_reg: 0.0          # set >0 if you want to regularize
 
 # training
-train_steps: 20000
+train_steps: 10000
 lr: 2.0e-4
 weight_decay: 0.0
 p_uncond: 0.1

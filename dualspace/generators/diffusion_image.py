@@ -24,6 +24,8 @@ class ImageDiffusion(nn.Module):
         betas = cosine_beta_schedule(T)
         alphas = 1.0 - betas
         alphas_cumprod = torch.cumprod(alphas, dim=0)
+        alphas_cumprod_prev = torch.cat([torch.tensor([1.0], device=alphas.device), alphas_cumprod[:-1]])
+        self.register_buffer('alphas_cumprod_prev', alphas_cumprod_prev)
         self.register_buffer('betas', betas)
         self.register_buffer('alphas', alphas)
         self.register_buffer('alphas_cumprod', alphas_cumprod)
@@ -45,8 +47,10 @@ class ImageDiffusion(nn.Module):
         eps_pred = self.unet(x_t, t, e_used)
         return F.mse_loss(eps_pred, noise)
     
+    # replace p_sample() with DDPM posterior
     @torch.no_grad()
-    def p_sample(self, x: torch.Tensor, t: int, e: torch.Tensor, guidance_scale: float = 2.0, null_e: torch.Tensor | None = None) -> torch.Tensor:
+    def p_sample(self, x: torch.Tensor, t: int, e: torch.Tensor,
+                guidance_scale: float = 1.5, null_e: torch.Tensor | None = None) -> torch.Tensor:
         t_tensor = torch.full((x.size(0),), t, device=x.device, dtype=torch.long)
         eps_c = self.unet(x, t_tensor, e)
         if null_e is not None and guidance_scale != 1.0:
@@ -54,18 +58,26 @@ class ImageDiffusion(nn.Module):
             eps = eps_u + guidance_scale * (eps_c - eps_u)
         else:
             eps = eps_c
+
         beta_t = self.betas[t]
         alpha_t = self.alphas[t]
-        alpha_bar_t = self.alphas_cumprod[t]
-        sqrt_one_minus_ab = torch.sqrt(1 - alpha_bar_t)
-        sqrt_recip_alpha = torch.sqrt(1.0 / alpha_t)
-        mean = (1/torch.sqrt(alpha_t)) * (x - (beta_t / sqrt_one_minus_ab) * eps)
+        abar_t = self.alphas_cumprod[t]
+        abar_prev = self.alphas_cumprod_prev[t]
+        # x0 prediction (eps-param)
+        x0_hat = (x - torch.sqrt(1 - abar_t) * eps) / torch.sqrt(abar_t)
+        x0_hat = x0_hat.clamp(-1, 1)   # dynamic thresholding-lite
+        # Posterior q(x_{t-1} | x_t, x0)
+        coeff1 = torch.sqrt(abar_prev) * beta_t / (1 - abar_t)
+        coeff2 = torch.sqrt(alpha_t)    * (1 - abar_prev) / (1 - abar_t)
+        mean = coeff1 * x0_hat + coeff2 * x
+        # True posterior variance (improves stability)
+        var = beta_t * (1 - abar_prev) / (1 - abar_t)
         if t > 0:
             noise = torch.randn_like(x)
-            sigma = torch.sqrt(beta_t)
-            return mean + sigma * noise
+            x_next = mean + torch.sqrt(var) * noise
         else:
-            return mean
+            x_next = mean
+        return x_next
 
     @torch.no_grad()
     def sample(self, e: torch.Tensor, K: int = 64, guidance_scale: float = 2.0, shape=(3,32,32), null_e: torch.Tensor | None = None) -> torch.Tensor:

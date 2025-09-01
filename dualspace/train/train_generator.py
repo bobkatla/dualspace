@@ -76,14 +76,14 @@ def train_generator(config: str):
                         mode=gcfg.get("mode", "linear_orth"),
                         orth_reg=float(gcfg.get("orth_reg", 0.0)))
     T = int(cfg.get("T", 200))
-    p_uncond = float(cfg.get("p_uncond", 0.1))
+    p_uncond = float(cfg.get("p_uncond", 0.05))
     diffusion = ImageDiffusion(in_ch=3, d_c=d_c, T=T, p_uncond=p_uncond)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     g.to(device)
     diffusion.to(device)
 
     # optim
-    lr = float(cfg.get("lr", 2e-4))
+    lr = float(cfg.get("lr", 1e-4))
     wd = float(cfg.get("weight_decay", 0.0))
     opt = AdamW(list(g.parameters()) + list(diffusion.parameters()), lr=lr, weight_decay=wd)
     scaler = GradScaler("cuda", enabled=bool(cfg.get("mixed_precision", True)) and device.type=="cuda")
@@ -112,6 +112,7 @@ def train_generator(config: str):
                 loss = diffusion.loss(x, e, null_e)
                 loss = loss + g.orthogonality_loss()
             scaler.scale(loss).backward()
+            torch.nn.utils.clip_grad_norm_(list(g.parameters()) + list(diffusion.parameters()), 1.0)
             scaler.step(opt)
             scaler.update()
             ema.update(diffusion)
@@ -131,6 +132,9 @@ def train_generator(config: str):
                     null1 = g.get_null(batch=e_grid.size(0))
                     x_samp = diffusion_ema.sample(e_grid, K=e_grid.size(0), guidance_scale=guidance, shape=(3,32,32), null_e=null1)
                     img = (x_samp.clamp(-1,1) + 1.0) / 2.0
+                    mx = x_samp.abs().max().item()
+                    nan_frac = torch.isnan(x_samp).float().mean().item()
+                    print(f"[sample] max|x|={mx:.2f}, NaN%={nan_frac*100:.3f}")
                     save_image_grid(img, out_dir / "samples" / f"step_{step:06d}.png", nrow=8)
                 del diffusion_ema
 
