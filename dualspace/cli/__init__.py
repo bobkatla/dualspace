@@ -9,6 +9,7 @@ from dualspace import __version__
 from dualspace.cli.calibrate import calibrate
 from dualspace.cli.dump_pairs import dump_pairs
 from dualspace.cli.infer import infer
+from dualspace.cli.metrics import metrics
 from dualspace.cli.train_amortized import train_amortized
 from dualspace.cli.train_gen import train_gen
 from dualspace.cli.visualize import visualize
@@ -45,3 +46,4 @@ main.add_command(fit_phi, name="fit-phi")
 main.add_command(region_infer, name="region-infer")
 main.add_command(coverage_curve, name="coverage-curve")
 main.add_command(pareto, name="pareto")
+main.add_command(metrics, name="metrics")
