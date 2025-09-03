@@ -15,6 +15,7 @@ from dualspace.cli.visualize import visualize
 from dualspace.cli.prep_data import prep_data
 from dualspace.cli.diag_g import diag_g
 from dualspace.cli.phi_image import fit_phi
+from dualspace.infer.region_infer import region_infer
 
 @click.group()
 @click.version_option(version=__version__, prog_name="dualspace")
@@ -39,3 +40,4 @@ main.add_command(visualize, name="visualize")
 main.add_command(prep_data, name="prep-data")
 main.add_command(diag_g, name="diag-g")
 main.add_command(fit_phi)
+main.add_command(region_infer, name="region-infer")
