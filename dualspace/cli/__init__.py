@@ -19,6 +19,7 @@ from dualspace.cli.phi_image import fit_phi
 from dualspace.infer.region_infer import region_infer
 from dualspace.cli.eval_coverage import coverage_curve
 from dualspace.cli.eval_pareto import pareto
+from dualspace.cli.export_test_img import export_test_images
 
 @click.group()
 @click.version_option(version=__version__, prog_name="dualspace")
@@ -47,3 +48,4 @@ main.add_command(region_infer, name="region-infer")
 main.add_command(coverage_curve, name="coverage-curve")
 main.add_command(pareto, name="pareto")
 main.add_command(metrics, name="metrics")
+main.add_command(export_test_images, name="export-test-images")
