@@ -1,19 +1,26 @@
-"""Sinkhorn OT distance in φ-space using POT (pip install pot)."""
-from __future__ import annotations
 import numpy as np
-import ot  # POT
+import ot
 
+def sinkhorn_cost(Yr: np.ndarray, Yf: np.ndarray, reg=0.1):
+    # Yr, Yf: (n,d) real/features in φ-space (float64 improves stability)
+    Yr = np.asarray(Yr, dtype=np.float64)
+    Yf = np.asarray(Yf, dtype=np.float64)
 
-def sinkhorn_phi(X: np.ndarray, Y: np.ndarray, reg: float = 0.05) -> float:
-    """
-    X, Y: (n,d), (m,d) features in φ-space.
-    reg: entropic regularization ε.
-    Returns Sinkhorn cost with squared Euclidean ground metric.
-    """
-    n, m = X.shape[0], Y.shape[0]
-    a = np.full(n, 1.0/n, dtype=float)
-    b = np.full(m, 1.0/m, dtype=float)
-    C = ot.dist(X, Y, metric='euclidean') ** 2  # (n,m)
-    P = ot.sinkhorn(a, b, C, reg)
-    cost = float((P * C).sum())
+    n, m = len(Yr), len(Yf)
+    a = np.ones(n, dtype=np.float64) / n
+    b = np.ones(m, dtype=np.float64) / m
+    # avoid exact zeros
+    eps = 1e-12
+    a = (a + eps); a /= a.sum()
+    b = (b + eps); b /= b.sum()
+
+    # squared Euclidean cost + tiny ridge to keep K bounded
+    C = ot.utils.dist(Yr, Yf, metric='euclidean') ** 2
+    C += eps
+
+    # log-domain Sinkhorn is much more stable
+    # returns the regularized OT cost; use sinkhorn2 to get the cost directly
+    G, log = ot.bregman.sinkhorn_log(a, b, C, reg=reg, log=True, stopThr=1e-9, numItermax=10000)
+    # cost = <G, C>
+    cost = float((G * C).sum())
     return cost

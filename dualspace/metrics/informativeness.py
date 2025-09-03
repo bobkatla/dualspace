@@ -1,20 +1,17 @@
 """Informativeness metrics in φ-space + simple diverse representative selection."""
 from __future__ import annotations
 import numpy as np
-from numpy.linalg import slogdet
 from typing import Tuple
 
 
-def logdet_cov_phi(Y: np.ndarray, eps: float = 1e-4) -> float:
-    """
-    Proxy for region 'size' / diffuseness in φ-space.
-    Y: (n, d_phi) survivors. Returns logdet(cov + eps I). If n<2 -> -inf.
-    """
-    if Y.shape[0] < 2:
-        return float("-inf")
-    C = np.cov(Y.T) + eps * np.eye(Y.shape[1], dtype=Y.dtype)
-    sign, val = slogdet(C)
-    return float(val) if sign > 0 else float("-inf")
+def logdet_cov_phi(y: np.ndarray, eps=1e-4) -> float:
+    # y: (n, d)
+    y = y - y.mean(axis=0, keepdims=True)
+    C = (y.T @ y) / max(len(y)-1, 1)
+    # ridge for numerical stability
+    C.flat[::C.shape[0]+1] += eps
+    s, _ = np.linalg.slogdet(C)
+    return float(_)
 
 
 def farthest_point_sampling(Y: np.ndarray, m: int, seed: int = 1337) -> Tuple[np.ndarray, np.ndarray]:

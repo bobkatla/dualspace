@@ -4,17 +4,6 @@ set -e
 CFG=configs/cifar10.yaml
 RUN=outputs/cifar10_mvp
 
-# recompute (if needed) region inference to produce .npz/.pt
-uv run dualspace region-infer --config $CFG --alpha 0.9 --per-class --K 256
-
-# coverage + pareto (JSONs)
-uv run dualspace coverage-curve --config $CFG --per-class
-uv run dualspace pareto          --config $CFG --per-class --K 256
-
-# plots
-uv run dualspace visualize coverage --run-dir $RUN
-uv run dualspace visualize pareto   --run-dir $RUN
-
 # export real test images for FID once
 uv run dualspace export-test-images --config $CFG --limit 5000
 
@@ -31,7 +20,7 @@ uv run dualspace metrics informativeness --phi-npz $FAKE_PHI
 uv run dualspace metrics mmd       --x-npz $FAKE_PHI --y-npz $REAL_PHI
 
 # Sinkhorn OT in φ-space
-uv run dualspace metrics sinkhorn  --x-npz $FAKE_PHI --y-npz $REAL_PHI --reg 0.05
+uv run dualspace metrics sinkhorn  --x-npz $FAKE_PHI --y-npz $REAL_PHI --reg 0.1
 
 # FID on images (subset of survivors vs test)
 uv run dualspace metrics fid       --real-pt $REAL_PT --fake-pt $FAKE_PT
