@@ -52,6 +52,9 @@ phi:
 # MDN
 mdn_components: 6
 mdn_hidden: 256
+lr_mdn: 1.0e-3
+train_steps_mdn: 5000
+batch_size_mdn: 512
 
 
 # sampling

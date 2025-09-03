@@ -20,34 +20,35 @@ Notes
 from __future__ import annotations
 import torch
 import torch.nn as nn
-import torch.distributions as D
+import torch.nn.functional as F
 
 
 class MDN(nn.Module):
-    def __init__(self, d_in: int, d_c: int, hidden: int = 256, components: int = 6):
+    def __init__(self, d_in: int, d_out: int, n_comp: int = 6, hidden: int = 256):
         super().__init__()
-        self.components = components
-        self.trunk = nn.Sequential(
-        nn.Linear(d_in + d_c, hidden), nn.SiLU(),
-        nn.Linear(hidden, hidden), nn.SiLU()
+        self.d_out, self.n_comp = d_out, n_comp
+        self.net = nn.Sequential(
+            nn.Linear(d_in, hidden), nn.SiLU(),
+            nn.Linear(hidden, hidden), nn.SiLU()
         )
-        self.head_logits = nn.Linear(hidden, components)
-        self.head_mu = nn.Linear(hidden, components * d_in)
-        self.head_logsigma = nn.Linear(hidden, components * d_in)
-        self.d_in = d_in
+        self.fc_pi = nn.Linear(hidden, n_comp)
+        self.fc_mu = nn.Linear(hidden, n_comp * d_out)
+        self.fc_logvar = nn.Linear(hidden, n_comp * d_out)
 
-
-    def _params(self, y: torch.Tensor, e: torch.Tensor):
-        h = self.trunk(torch.cat([y, e], dim=-1))
-        logits = self.head_logits(h)
-        mu = self.head_mu(h).view(-1, self.components, self.d_in)
-        logsig = self.head_logsigma(h).view(-1, self.components, self.d_in)
-        return logits, mu, logsig
-
+    def forward(self, e: torch.Tensor):
+        h = self.net(e)
+        log_pi = self.fc_pi(h)                # (B,K)
+        pi = F.log_softmax(log_pi, dim=-1)
+        mu = self.fc_mu(h).view(-1, self.n_comp, self.d_out)
+        logvar = self.fc_logvar(h).view(-1, self.n_comp, self.d_out)
+        return pi, mu, logvar
 
     def log_prob(self, y: torch.Tensor, e: torch.Tensor) -> torch.Tensor:
-        logits, mu, logsig = self._params(y, e)
-        # mixture of diagonal Gaussians
-        comp = D.Independent(D.Normal(loc=mu, scale=torch.exp(logsig).clamp_min(1e-4)), 1)
-        log_probs = comp.log_prob(y.unsqueeze(1).expand_as(mu)) # (B, M)
-        return torch.logsumexp(log_probs + torch.log_softmax(logits, dim=-1), dim=-1)
+        """Compute log p(y|e). Returns (B,)."""
+        log_pi, mu, logvar = self.forward(e)
+        y_exp = y.unsqueeze(1)  # (B,1,D)
+        var = logvar.exp()
+        log_comp = -0.5 * (((y_exp - mu) ** 2) / var + logvar + torch.log(torch.tensor(2*torch.pi, device=y.device)))
+        log_comp = log_comp.sum(dim=-1)       # (B,K)
+        log_mix = torch.logsumexp(log_pi + log_comp, dim=-1)  # (B,)
+        return log_mix

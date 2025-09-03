@@ -1,8 +1,10 @@
+"""Train MDN on (e,y) pairs."""
 from __future__ import annotations
 import click
+from dualspace.train.train_amortized import train_amor
 
-@click.command()
-@click.option("--config", type=click.Path(exists=True, dir_okay=False, path_type=str), required=True)
+
+@click.command("train-amortized")
+@click.option("--config", type=click.Path(exists=True), required=True)
 def train_amortized(config: str):
-    """Train MDN on dumped pairs."""
-    click.echo(f"[train-amortized] {config}")
+    train_amor(config)
