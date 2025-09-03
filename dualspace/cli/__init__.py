@@ -16,6 +16,8 @@ from dualspace.cli.prep_data import prep_data
 from dualspace.cli.diag_g import diag_g
 from dualspace.cli.phi_image import fit_phi
 from dualspace.infer.region_infer import region_infer
+from dualspace.cli.eval_coverage import coverage_curve
+from dualspace.cli.eval_pareto import pareto
 
 @click.group()
 @click.version_option(version=__version__, prog_name="dualspace")
@@ -39,5 +41,7 @@ main.add_command(infer, name="infer")
 main.add_command(visualize, name="visualize")
 main.add_command(prep_data, name="prep-data")
 main.add_command(diag_g, name="diag-g")
-main.add_command(fit_phi)
+main.add_command(fit_phi, name="fit-phi")
 main.add_command(region_infer, name="region-infer")
+main.add_command(coverage_curve, name="coverage-curve")
+main.add_command(pareto, name="pareto")
