@@ -18,21 +18,49 @@ CLI
 python -m dualspace.regions.conformal --config configs/cifar10.yaml --split calib
 """
 from __future__ import annotations
-import argparse
+from pathlib import Path
 from typing import Dict, List
+import json
+import numpy as np
 
 
-# TODO: implement main() that loads MDN + phi + g, computes thresholds per class and saves JSON
+def _conformal_index(n: int, alpha: float) -> int:
+    """Finite-sample index for coverage >= alpha on one-sided sets."""
+    # threshold = ceil(alpha * (n + 1)) - 1  (0-based)
+    k = int(np.ceil(alpha * (n + 1))) - 1
+    return max(0, min(k, n - 1))
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, required=True)
-    parser.add_argument("--split", type=str, default="calib")
-    args = parser.parse_args()
-    # TODO
-    raise NotImplementedError
+def per_class_thresholds(scores: Dict[int, np.ndarray], alphas: List[float]) -> Dict[int, Dict[str, float]]:
+    """
+    scores[k] = array of nonconformity scores s = -log p(y|e) for class k (calib split).
+    Returns per-class log-prob thresholds tau_alpha = -s_alpha (since region is logp >= tau_alpha).
+    """
+    out: Dict[int, Dict[str, float]] = {}
+    for k, s in scores.items():
+        s_sorted = np.sort(np.asarray(s))
+        n = len(s_sorted)
+        out_k: Dict[str, float] = {}
+        for a in alphas:
+            idx = _conformal_index(n, a)
+            s_thr = float(s_sorted[idx])
+            out_k[f"{a:.3f}"] = -s_thr
+        out[int(k)] = out_k
+    return out
 
 
-if __name__ == "__main__":
-    main()
+def pooled_thresholds(scores_all: np.ndarray, alphas: List[float]) -> Dict[str, float]:
+    s_sorted = np.sort(scores_all)
+    n = len(s_sorted)
+    out = {}
+    for a in alphas:
+        idx = _conformal_index(n, a)
+        s_thr = float(s_sorted[idx])
+        out[f"{a:.3f}"] = -s_thr
+    return out
+
+
+def save_json(obj, path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, indent=2)
