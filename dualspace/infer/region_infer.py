@@ -105,7 +105,7 @@ def region_infer(config: str, alpha: float, per_class: bool, k: int):
         np.savez_compressed(out_dir / f"class{c}_drafts_phi.npz",
                     Y=Y, logp=logp)                            # all drafts in φ
         np.savez_compressed(out_dir / f"class{c}_survivors_phi.npz",
-                            Y=Y[mask.cpu().numpy()], logp=logp[mask])  # survivors in φ
+                            Y=Y[mask], logp=logp[mask])  # survivors in φ
 
         # also save survivor images (for FID) in [0,1]
         torch.save(survivors, out_dir / f"class{c}_survivors.pt")
