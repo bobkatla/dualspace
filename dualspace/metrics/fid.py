@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.models import inception_v3
+import numpy as np
+from scipy import linalg
 
 @torch.no_grad()
 def _inception_pool3_features(x_bchw, model, device):
@@ -13,49 +15,57 @@ def _inception_pool3_features(x_bchw, model, device):
     x = x.to(device)
     return model(x)  # returns pool3 activations (N, 2048)
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torchvision.models import inception_v3, Inception_V3_Weights
+
 class InceptionPool3(nn.Module):
     def __init__(self, device):
         super().__init__()
-        inc = inception_v3(weights="IMAGENET1K_V1", aux_logits=False)
-        inc.fc = nn.Identity()  # we won't use logits
+        weights = Inception_V3_Weights.DEFAULT  # == IMAGENET1K_V1
+        # IMPORTANT: aux_logits must be True when using pretrained weights
+        inc = inception_v3(weights=weights, aux_logits=True)
         inc.eval()
         self.device = device
         self.inc = inc.to(device)
+        self.preprocess = weights.transforms()  # resize + normalize
 
-        # Register a forward hook on the last pooling layer (Mixed_7c -> AdaptiveAvgPool2d)
-        self.features = None
-        def hook(module, input, output):
-            # output: (N, 2048, 1, 1) -> squeeze to (N, 2048)
-            self.features = output.squeeze(-1).squeeze(-1)
-        # Grab the adaptive avgpool node
+        # Hook on avgpool to capture (N, 2048, 1, 1)
+        self._feats = None
+        def hook(_, __, output):
+            self._feats = output.squeeze(-1).squeeze(-1)  # (N, 2048)
         self.inc.avgpool.register_forward_hook(hook)
 
     @torch.no_grad()
-    def __call__(self, x):
-        # Clear holder
-        self.features = None
-        _ = self.inc(x)   # triggers hook
-        return self.features
+    def features(self, x_0_1):  # x expected in [0,1]
+        # Preprocess to 299 + imagenet normalization
+        # weights.transforms() expects PIL/float tensor in [0,1]; it handles resize
+        x = F.interpolate(x_0_1, size=(299, 299), mode="bilinear", align_corners=False)
+        x = self.preprocess(x)  # channel-wise normalize
+        x = x.to(self.device)
+        self._feats = None
+        _ = self.inc(x)  # triggers hook
+        return self._feats  # (N, 2048)
 
 @torch.no_grad()
 def activations_in_batches(x_all: torch.Tensor, batch_size: int, device: torch.device):
+    # Map from [-1,1] to [0,1] if needed
+    if x_all.min() < 0:
+        x_all = (x_all + 1.0) * 0.5
     model = InceptionPool3(device)
     feats = []
     for i in range(0, x_all.size(0), batch_size):
-        xb = x_all[i:i+batch_size]
-        fb = _inception_pool3_features(xb, model, device)  # (B, 2048)
+        fb = model.features(x_all[i:i+batch_size].contiguous())
         feats.append(fb.cpu())
     return torch.cat(feats, dim=0).numpy()  # (N, 2048)
 
 def _mu_sigma(feats_np):
-    import numpy as np
     mu = feats_np.mean(axis=0)
     sigma = np.cov(feats_np, rowvar=False)
     return mu, sigma
 
 def _fid_from_musig(mu1, sig1, mu2, sig2):
-    import numpy as np
-    from scipy import linalg
     diff = mu1 - mu2
     covmean, _ = linalg.sqrtm(sig1.dot(sig2), disp=False)
     if not np.isfinite(covmean).all():
