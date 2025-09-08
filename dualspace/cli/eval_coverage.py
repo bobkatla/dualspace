@@ -1,7 +1,7 @@
 from __future__ import annotations
 import json, yaml, click, numpy as np, torch
 from pathlib import Path
-from dualspace.densities.mdn import MDN
+from dualspace.densities.mdn import CondMDN
 
 @click.command("coverage-curve")
 @click.option("--config", type=click.Path(exists=True), required=True)
@@ -19,9 +19,8 @@ def coverage_curve(config: str, per_class: bool):
     d_in, d_out = E.shape[1], Y.shape[1]
 
     # load MDN
-    mdn = MDN(d_in, d_out, n_comp=int(cfg.get("mdn_components", 6)), hidden=int(cfg.get("mdn_hidden", 256)))
-    state = torch.load(run_dir / "amortized" / "best.pt", map_location="cpu")
-    mdn.load_state_dict(state); mdn.eval()
+    mdn = CondMDN.load(run_dir / "amortized" / "best.pt", map_location="cpu")
+    mdn.eval()
     with torch.no_grad():
         logp = mdn.log_prob(torch.from_numpy(Y), torch.from_numpy(E)).cpu().numpy()
 

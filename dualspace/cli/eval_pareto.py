@@ -5,7 +5,7 @@ from numpy.linalg import slogdet
 from dualspace.encoders.condition_encoder import ConditionEncoder
 from dualspace.generators.diffusion_image import ImageDiffusion
 from dualspace.encoders.phi_image import PhiImage
-from dualspace.densities.mdn import MDN
+from dualspace.densities.mdn import CondMDN
 
 def logdet_cov(Y: np.ndarray, eps: float = 1e-4) -> float:
     # Y: (n, d) in φ-space; regularized covariance
@@ -37,12 +37,10 @@ def pareto(config: str, k: int, per_class: bool):
     diffusion.load_state_dict(state["diffusion"])
 
     phi = PhiImage(d_out=int(cfg.get("d_phi", 128))).to(device).eval()
-    phi.pca = joblib.load(run_dir / "phi" / "pca.joblib")
+    phi.load(run_dir / "phi")
 
-    mdn = MDN(d_c, int(cfg.get("d_phi", 128)),
-              n_comp=int(cfg.get("mdn_components", 6)),
-              hidden=int(cfg.get("mdn_hidden", 256))).to(device).eval()
-    mdn.load_state_dict(torch.load(run_dir / "amortized" / "best.pt", map_location=device))
+    mdn = CondMDN.load(run_dir / "amortized" / "best.pt", map_location=device)
+    mdn.eval()
 
     # test pairs for coverage
     test = np.load(run_dir / "pairs" / "test.npz")

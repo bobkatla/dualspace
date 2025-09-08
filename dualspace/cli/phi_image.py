@@ -27,6 +27,9 @@ def fit_phi(config):
         feats.append(f)
     feats = np.concatenate(feats, axis=0)  # (N,512)
 
-    Z = phi.fit_pca(feats, out_dir)
+    var_keep = float(cfg.get("pca_var_keep", 0.99))
+    min_eig_val = float(cfg.get("pca_min_eig_val", 1e-4))
+    Z = phi.fit(feats, out_dir, var_keep=var_keep, min_eig_val=min_eig_val)
+
     np.save(out_dir / "train_proj.npy", Z)
-    print(f"[fit-phi] saved PCA with {phi.d_out} comps → {out_dir}")
+    print(f"[fit-phi] saved standardized PCA with {phi.pca.n_components_} comps to {out_dir}")

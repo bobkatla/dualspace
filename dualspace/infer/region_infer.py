@@ -9,12 +9,13 @@ python -m dualspace.infer.region_infer --config configs/cifar10.yaml --split tes
 from __future__ import annotations
 import click, yaml, torch, numpy as np
 from pathlib import Path
-import joblib
 
 from dualspace.encoders.condition_encoder import ConditionEncoder
 from dualspace.generators.diffusion_image import ImageDiffusion
 from dualspace.encoders.phi_image import PhiImage
-from dualspace.densities.mdn import MDN
+from dualspace.densities.mdn import CondMDN
+from dualspace.regions.conformal import TauAlpha
+from dualspace.regions.levelset import LevelSetRegion
 from dualspace.utils.io import save_json
 from dualspace.utils.vision import save_image_grid
 
@@ -22,10 +23,13 @@ from dualspace.utils.vision import save_image_grid
 @click.command("region-infer")
 @click.option("--config", type=click.Path(exists=True), required=True)
 @click.option("--alpha", type=float, default=0.9, help="Target coverage α")
-@click.option("--per-class/--pooled", default=True)
-@click.option("--K", type=int, default=256, help="#drafts per condition")
-def region_infer(config: str, alpha: float, per_class: bool, k: int):
-    """Given conditions, sample K drafts, score in φ-space, keep those above τ_α."""
+@click.option("--viz-samples", type=int, default=256, help="# drafts to generate for visualization")
+@click.option("--region-mode", type=click.Choice(['levelset']), default='levelset')
+def region_infer(config: str, alpha: float, viz_samples: int, region_mode: str):
+    """
+    For a given condition, defines a deterministic region and optionally visualizes it
+    by generating samples and filtering them.
+    """
     with open(config, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
@@ -35,87 +39,88 @@ def region_infer(config: str, alpha: float, per_class: bool, k: int):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Load g(c)
-    num_classes, d_c = int(cfg.get("num_classes", 10)), int(cfg.get("d_c", 64))
+    # --- Load all components for the LevelSetRegion ---
+    # Condition Encoder g(c)
+    num_classes = int(cfg.get("num_classes", 10))
+    d_c = int(cfg.get("d_c", 64))
     gcfg = cfg.get("g", {})
     g = ConditionEncoder(num_classes=num_classes, d_c=d_c,
                          hidden=int(gcfg.get("hidden", 256)),
                          depth=int(gcfg.get("depth", 2)),
-                         dropout=float(gcfg.get("dropout", 0.0)),
-                         norm=gcfg.get("norm", None),
                          mode=gcfg.get("mode", "linear_orth"))
-    g.to(device).eval()
-
-    # Load diffusion (EMA ckpt recommended)
-    ckpt = torch.load(run_dir / "ckpts" / "step_020000.pt", map_location=device)
+    # No need to load g weights if we use the saved (e,y) pairs.
+    # But for sampling new images, we need g and diffusion.
+    
+    # Diffusion model (for visualization sampling)
+    ckpt_path = sorted((run_dir / "ckpts").glob("step_*.pt"))[-1]
+    ckpt = torch.load(ckpt_path, map_location=device)
     diffusion = ImageDiffusion(in_ch=3, d_c=d_c, T=int(cfg.get("T", 200)))
     diffusion.load_state_dict(ckpt["diffusion"])
     diffusion.to(device).eval()
+    g.to(device).eval() # g is needed for diffusion
 
-    # Load φ with PCA
-    phi = PhiImage(d_out=int(cfg.get("d_phi", 128))).to(device)
-    phi.pca = joblib.load(run_dir / "phi" / "pca.joblib")
+    # Phi processor
+    phi = PhiImage(d_out=int(cfg.get("d_phi", 128))).to(device).eval()
+    phi.load(run_dir / "phi")
 
-    # Load MDN
-    d_in, d_out = d_c, int(cfg.get("d_phi", 128))
-    mdn = MDN(d_in, d_out, n_comp=int(cfg.get("mdn_components", 6)), hidden=int(cfg.get("mdn_hidden", 256)))
-    state = torch.load(run_dir / "amortized" / "best.pt", map_location=device)
-    mdn.load_state_dict(state)
-    mdn.to(device).eval()
+    # Amortized density model
+    mdn = CondMDN.load(run_dir / "amortized" / "best.pt", map_location=device).eval()
 
-    # Load taus
-    taus = yaml.safe_load(open(run_dir / "conformal" / "taus.json", "r"))
-    if per_class:
-        taus = taus["per_class"]
-    else:
-        taus = taus["pooled"]
+    # Conformal thresholds
+    tau_handler = TauAlpha.load(run_dir / "conformal" / "taus.json")
+    
+    # The deterministic region object
+    region = LevelSetRegion(phi=phi, mdn=mdn, tau_handler=tau_handler)
 
+    # --- Main loop: visualize region for each class ---
     eye = torch.eye(num_classes, device=device)
     for c in range(num_classes):
-        e = g(eye[c].unsqueeze(0)).repeat(k, 1)
-        null_e = g.get_null(batch=k)
-        # sample K
+        # Sample K drafts for visualization
+        e = g(eye[c].unsqueeze(0)).repeat(viz_samples, 1)
+        null_e = g.get_null(batch=viz_samples)
+        
         with torch.no_grad():
-            x_samp = diffusion.sample(e, K=k, guidance_scale=float(cfg.get("guidance_scale", 1.3)), shape=(3,32,32), null_e=null_e)
-        img = (x_samp.clamp(-1,1) + 1.0) / 2.0
+            x_samp = diffusion.sample(
+                e, K=viz_samples, 
+                guidance_scale=float(cfg.get("guidance_scale", 1.3)), 
+                shape=(3,32,32), 
+                null_e=null_e
+            )
+        img_drafts = (x_samp.clamp(-1,1) + 1.0) / 2.0
 
-        # project φ
+        # Project drafts into phi-space to check for containment
         feats = []
-        for i in range(0, k, 32):
+        for i in range(0, viz_samples, 32):
             xb = x_samp[i:i+32].to(device)
             f = phi(xb).cpu().numpy()
             feats.append(f)
         feats = np.concatenate(feats, axis=0)
-        Y = phi.transform(feats)   # (K,d_phi)
-        E = e.detach().cpu().numpy()
+        Y_drafts = phi.transform(feats)
+        E_drafts = e.detach().cpu().numpy()
+        C_drafts = np.full(viz_samples, c)
+        
+        # Filter drafts using the deterministic region
+        mask = region.contains_y(Y_drafts, E_drafts, C_drafts, alpha)
+        survivors = img_drafts[mask]
 
-        # scores
-        with torch.no_grad():
-            logp = mdn.log_prob(torch.from_numpy(Y).to(device), torch.from_numpy(E).to(device)).cpu().numpy()
-
-        # threshold
-        if per_class:
-            thr = taus[str(c)][f"{alpha:.3f}"]
-        else:
-            thr = taus[f"{alpha:.3f}"]
-
-        mask = logp >= thr
-        survivors = img[mask]
-
-        np.savez_compressed(out_dir / f"class{c}_drafts_phi.npz",
-                    Y=Y, logp=logp)                            # all drafts in φ
-        np.savez_compressed(out_dir / f"class{c}_survivors_phi.npz",
-                            Y=Y[mask], logp=logp[mask])  # survivors in φ
-
-        # also save survivor images (for FID) in [0,1]
+        # Save artifacts
+        np.savez_compressed(out_dir / f"class{c}_drafts_phi.npz", Y=Y_drafts)
+        np.savez_compressed(out_dir / f"class{c}_survivors_phi.npz", Y=Y_drafts[mask])
         torch.save(survivors, out_dir / f"class{c}_survivors.pt")
-
-        # save
-        save_image_grid(img[:64], out_dir / f"class{c}_all.png", nrow=8)
+        
+        save_image_grid(img_drafts[:64], out_dir / f"class{c}_all_drafts.png", nrow=8)
         if survivors.size(0) > 0:
             save_image_grid(survivors[:64], out_dir / f"class{c}_survivors.png", nrow=8)
 
-        cov = float(mask.mean())
-        save_json(out_dir / f"class{c}_stats.json", {"coverage": cov, "thr": thr, "kept": int(mask.sum()), "total": k})
-
-        print(f"[region-infer] class {c}: kept {mask.sum()}/{k} (cov={cov:.3f})")
+        acceptance_rate = float(mask.mean())
+        stats = {
+            "alpha": alpha,
+            "acceptance_rate": acceptance_rate,
+            "kept": int(mask.sum()),
+            "total_drafts": viz_samples,
+            "region_mode": region_mode,
+            "threshold": region.tau_handler.t(alpha, c) if tau_handler.mode == 'class' else region.tau_handler.t(alpha)
+        }
+        save_json(out_dir / f"class{c}_stats.json", stats)
+        
+        print(f"[region-infer] class {c}: kept {mask.sum()}/{viz_samples} (acceptance rate={acceptance_rate:.3f})")
